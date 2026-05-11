@@ -15,39 +15,45 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"/>
 
+    <!-- 顶部栏 -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
+        android:orientation="horizontal"
         android:background="@color/overlay_dark"
         android:paddingTop="40dp"
-        android:paddingBottom="20dp"
+        android:paddingBottom="16dp"
         android:paddingLeft="24dp"
         android:paddingRight="24dp"
-        android:gravity="center"
+        android:gravity="center_vertical"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
         <TextView
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:text="条形码扫描"
             android:textColor="@color/white"
             android:textSize="20sp"
             android:textStyle="bold"/>
 
-        <ImageView
-            android:id="@+id/ivSuccess"
-            android:layout_width="24dp"
-            android:layout_height="24dp"
-            android:layout_marginTop="4dp"
-            android:src="@android:drawable/checkbox_on_background"
-            android:visibility="gone"/>
+        <Button
+            android:id="@+id/btnHistory"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="历史记录"
+            android:textSize="13sp"
+            android:textColor="@color/white"
+            android:backgroundTint="@color/btn_secondary"
+            android:paddingLeft="14dp"
+            android:paddingRight="14dp"/>
 
     </LinearLayout>
 
+    <!-- 扫描框 -->
     <FrameLayout
         android:id="@+id/scannerOverlay"
         android:layout_width="match_parent"
@@ -77,6 +83,7 @@
 
     </FrameLayout>
 
+    <!-- 提示文字 -->
     <TextView
         android:id="@+id/tvHint"
         android:layout_width="wrap_content"
@@ -94,6 +101,19 @@
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_marginBottom="160dp"/>
 
+    <!-- 成功图标 -->
+    <ImageView
+        android:id="@+id/ivSuccess"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:src="@android:drawable/checkbox_on_background"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginBottom="220dp"/>
+
+    <!-- 结果卡片 -->
     <LinearLayout
         android:id="@+id/resultCard"
         android:layout_width="match_parent"
