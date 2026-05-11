@@ -6,11 +6,9 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.pm.PackageManager;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
-import android.os.VibratorManager;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
@@ -23,11 +21,13 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageAnalysis;
+import androidx.camera.core.ImageProxy;
 import androidx.camera.core.Preview;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
 import androidx.core.content.ContextCompat;
 
+import com.google.common.util.concurrent.ListenableFuture;
 import com.google.mlkit.vision.barcode.BarcodeScanner;
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions;
 import com.google.mlkit.vision.barcode.BarcodeScanning;
@@ -52,16 +52,16 @@ public class MainActivity extends AppCompatActivity {
     private ImageView ivSuccess;
 
     private ExecutorService cameraExecutor;
-    private String lastScannedResult = "";
     private volatile boolean isScanning = true;
+    private String lastScannedResult = "";
+    private BarcodeScanner barcodeScanner;
 
-    private final ActivityResultLauncher<String> requestPermissionLauncher =
+    private final ActivityResultLauncher<String> permissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
                 if (granted) {
                     startCamera();
                 } else {
-                    tvHint.setText("请授予相机权限后重启应用");
-                    Toast.makeText(this, "需要相机权限才能扫码", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "需要相机权限", Toast.LENGTH_LONG).show();
                 }
             });
 
@@ -70,20 +70,25 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        previewView  = findViewById(R.id.previewView);
-        tvResult     = findViewById(R.id.tvResult);
-        tvHint       = findViewById(R.id.tvHint);
-        btnCopy      = findViewById(R.id.btnCopy);
-        btnRescan    = findViewById(R.id.btnRescan);
-        resultCard   = findViewById(R.id.resultCard);
+        previewView    = findViewById(R.id.previewView);
+        tvResult       = findViewById(R.id.tvResult);
+        tvHint         = findViewById(R.id.tvHint);
+        btnCopy        = findViewById(R.id.btnCopy);
+        btnRescan      = findViewById(R.id.btnRescan);
+        resultCard     = findViewById(R.id.resultCard);
         scannerOverlay = findViewById(R.id.scannerOverlay);
-        scanLine     = findViewById(R.id.scanLine);
-        ivSuccess    = findViewById(R.id.ivSuccess);
+        scanLine       = findViewById(R.id.scanLine);
+        ivSuccess      = findViewById(R.id.ivSuccess);
 
         cameraExecutor = Executors.newSingleThreadExecutor();
 
+        BarcodeScannerOptions options = new BarcodeScannerOptions.Builder()
+                .setBarcodeFormats(Barcode.FORMAT_ALL_FORMATS)
+                .build();
+        barcodeScanner = BarcodeScanning.getClient(options);
+
         btnCopy.setOnClickListener(v -> copyToClipboard());
-        btnRescan.setOnClickListener(v -> startScanning());
+        btnRescan.setOnClickListener(v -> resumeScanning());
 
         startScanLineAnimation();
 
@@ -91,115 +96,121 @@ public class MainActivity extends AppCompatActivity {
                 == PackageManager.PERMISSION_GRANTED) {
             startCamera();
         } else {
-            requestPermissionLauncher.launch(Manifest.permission.CAMERA);
+            permissionLauncher.launch(Manifest.permission.CAMERA);
         }
     }
 
     private void startScanLineAnimation() {
-        ObjectAnimator animator = ObjectAnimator.ofFloat(scanLine, "translationY", 0f, 500f);
-        animator.setDuration(2000);
-        animator.setRepeatCount(ObjectAnimator.INFINITE);
-        animator.setRepeatMode(ObjectAnimator.REVERSE);
-        animator.start();
+        ObjectAnimator anim = ObjectAnimator.ofFloat(scanLine, "translationY", 0f, 480f);
+        anim.setDuration(1800);
+        anim.setRepeatCount(ObjectAnimator.INFINITE);
+        anim.setRepeatMode(ObjectAnimator.REVERSE);
+        anim.start();
     }
 
     private void startCamera() {
-        ProcessCameraProvider.getInstance(this).addListener(() -> {
+        ListenableFuture<ProcessCameraProvider> future =
+                ProcessCameraProvider.getInstance(this);
+
+        future.addListener(() -> {
             try {
-                ProcessCameraProvider cameraProvider =
-                        ProcessCameraProvider.getInstance(this).get();
+                ProcessCameraProvider provider = future.get();
+                provider.unbindAll();
 
                 Preview preview = new Preview.Builder().build();
                 preview.setSurfaceProvider(previewView.getSurfaceProvider());
 
-                BarcodeScannerOptions options = new BarcodeScannerOptions.Builder()
-                        .setBarcodeFormats(Barcode.FORMAT_ALL_FORMATS)
-                        .build();
-                BarcodeScanner scanner = BarcodeScanning.getClient(options);
-
-                ImageAnalysis imageAnalysis = new ImageAnalysis.Builder()
+                ImageAnalysis analysis = new ImageAnalysis.Builder()
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .build();
 
-                imageAnalysis.setAnalyzer(cameraExecutor, imageProxy -> {
-                    if (!isScanning) {
-                        imageProxy.close();
-                        return;
-                    }
-                    try {
-                        @SuppressWarnings("UnsafeOptInUsageError")
-                        InputImage image = InputImage.fromMediaImage(
-                                imageProxy.getImage(),
-                                imageProxy.getImageInfo().getRotationDegrees());
+                analysis.setAnalyzer(cameraExecutor, this::analyzeImage);
 
-                        scanner.process(image)
-                                .addOnSuccessListener(barcodes -> {
-                                    if (!barcodes.isEmpty() && isScanning) {
-                                        String value = barcodes.get(0).getRawValue();
-                                        if (value != null && !value.isEmpty()) {
-                                            isScanning = false;
-                                            runOnUiThread(() -> showResult(value));
-                                        }
-                                    }
-                                })
-                                .addOnFailureListener(e -> Log.e(TAG, "Scan error", e))
-                                .addOnCompleteListener(t -> imageProxy.close());
-                    } catch (Exception e) {
-                        Log.e(TAG, "Analysis error", e);
-                        imageProxy.close();
-                    }
-                });
-
-                cameraProvider.unbindAll();
-                cameraProvider.bindToLifecycle(this,
-                        CameraSelector.DEFAULT_BACK_CAMERA, preview, imageAnalysis);
+                provider.bindToLifecycle(
+                        this,
+                        CameraSelector.DEFAULT_BACK_CAMERA,
+                        preview,
+                        analysis
+                );
 
             } catch (Exception e) {
-                Log.e(TAG, "Camera init error", e);
+                Log.e(TAG, "startCamera failed", e);
                 runOnUiThread(() ->
-                        Toast.makeText(this, "相机启动失败: " + e.getMessage(),
-                                Toast.LENGTH_LONG).show());
+                        Toast.makeText(this, "相机启动失败，请重启应用", Toast.LENGTH_LONG).show()
+                );
             }
         }, ContextCompat.getMainExecutor(this));
+    }
+
+    private void analyzeImage(ImageProxy imageProxy) {
+        if (!isScanning) {
+            imageProxy.close();
+            return;
+        }
+
+        try {
+            @SuppressWarnings("UnsafeOptInUsageError")
+            android.media.Image mediaImage = imageProxy.getImage();
+            if (mediaImage == null) {
+                imageProxy.close();
+                return;
+            }
+
+            InputImage image = InputImage.fromMediaImage(
+                    mediaImage,
+                    imageProxy.getImageInfo().getRotationDegrees()
+            );
+
+            barcodeScanner.process(image)
+                    .addOnSuccessListener(barcodes -> {
+                        if (!barcodes.isEmpty() && isScanning) {
+                            Barcode barcode = barcodes.get(0);
+                            String value = barcode.getRawValue();
+                            if (value != null && !value.isEmpty()) {
+                                isScanning = false;
+                                runOnUiThread(() -> showResult(value));
+                            }
+                        }
+                    })
+                    .addOnFailureListener(e -> Log.w(TAG, "Scan failed", e))
+                    .addOnCompleteListener(task -> imageProxy.close());
+
+        } catch (Exception e) {
+            Log.e(TAG, "analyzeImage error", e);
+            imageProxy.close();
+        }
     }
 
     private void showResult(String result) {
         lastScannedResult = result;
         vibrate();
+
         tvResult.setText(result);
-        resultCard.setVisibility(View.VISIBLE);
         scannerOverlay.setVisibility(View.GONE);
         tvHint.setText("扫描完成");
         ivSuccess.setVisibility(View.VISIBLE);
+
         resultCard.setAlpha(0f);
-        resultCard.animate().alpha(1f).setDuration(300).start();
+        resultCard.setVisibility(View.VISIBLE);
+        resultCard.animate().alpha(1f).setDuration(250).start();
     }
 
     private void vibrate() {
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                VibratorManager vm = (VibratorManager)
-                        getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
-                if (vm != null) {
-                    vm.getDefaultVibrator().vibrate(
-                            VibrationEffect.createOneShot(150, VibrationEffect.DEFAULT_AMPLITUDE));
-                }
-            } else {
-                Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
-                if (v != null && v.hasVibrator()) {
-                    v.vibrate(VibrationEffect.createOneShot(150, VibrationEffect.DEFAULT_AMPLITUDE));
-                }
+            Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+            if (v != null && v.hasVibrator()) {
+                v.vibrate(VibrationEffect.createOneShot(120, VibrationEffect.DEFAULT_AMPLITUDE));
             }
         } catch (Exception e) {
-            Log.e(TAG, "Vibrate error", e);
+            Log.e(TAG, "vibrate error", e);
         }
     }
 
     private void copyToClipboard() {
         if (lastScannedResult.isEmpty()) return;
-        ClipboardManager clipboard =
-                (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-        clipboard.setPrimaryClip(ClipData.newPlainText("barcode", lastScannedResult));
+
+        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        cm.setPrimaryClip(ClipData.newPlainText("barcode", lastScannedResult));
 
         btnCopy.setText("✓ 已复制");
         btnCopy.setBackgroundTintList(
@@ -209,10 +220,11 @@ public class MainActivity extends AppCompatActivity {
             btnCopy.setBackgroundTintList(
                     ContextCompat.getColorStateList(this, R.color.accent_blue));
         }, 2000);
+
         Toast.makeText(this, "已复制到剪贴板", Toast.LENGTH_SHORT).show();
     }
 
-    private void startScanning() {
+    private void resumeScanning() {
         lastScannedResult = "";
         isScanning = true;
         resultCard.setVisibility(View.GONE);
@@ -225,5 +237,6 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         cameraExecutor.shutdown();
+        barcodeScanner.close();
     }
 }
