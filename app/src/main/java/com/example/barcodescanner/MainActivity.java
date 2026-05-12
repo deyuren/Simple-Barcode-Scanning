@@ -245,7 +245,7 @@ public class MainActivity extends AppCompatActivity {
             }
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                     .edit().putString(KEY_HISTORY, arr.toString()).apply();
-        } catch (JSONException e) {
+        } catch (Exception e) {
             Log.e(TAG, "persistHistory error", e);
         }
     }
@@ -260,7 +260,7 @@ public class MainActivity extends AppCompatActivity {
                 JSONArray entry = arr.getJSONArray(i);
                 historyList.add(new String[]{entry.getString(0), entry.getString(1)});
             }
-        } catch (JSONException e) {
+        } catch (Exception e) {
             Log.e(TAG, "loadHistory error", e);
         }
     }
