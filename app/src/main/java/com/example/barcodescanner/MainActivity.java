@@ -7,25 +7,26 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.media.AudioManager;
 import android.media.ToneGenerator;
 import android.os.Bundle;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.util.Log;
-import android.view.LayoutInflater;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.ArrayAdapter;
+import android.view.Window;
+import android.widget.BaseAdapter;
 import android.widget.Button;
 import android.widget.ImageView;
-import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageAnalysis;
@@ -76,15 +77,12 @@ public class MainActivity extends AppCompatActivity {
     private String lastScannedResult = "";
     private BarcodeScanner barcodeScanner;
     private ToneGenerator toneGenerator;
-    private List<String[]> historyList = new ArrayList<>(); // [value, time]
+    private final List<String[]> historyList = new ArrayList<>();
 
     private final ActivityResultLauncher<String> permissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
-                if (granted) {
-                    startCamera();
-                } else {
-                    Toast.makeText(this, "需要相机权限", Toast.LENGTH_LONG).show();
-                }
+                if (granted) startCamera();
+                else Toast.makeText(this, "需要相机权限", Toast.LENGTH_LONG).show();
             });
 
     @Override
@@ -105,22 +103,19 @@ public class MainActivity extends AppCompatActivity {
 
         cameraExecutor = Executors.newSingleThreadExecutor();
 
-        try {
-            toneGenerator = new ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80);
-        } catch (Exception e) {
-            Log.e(TAG, "ToneGenerator init failed", e);
-        }
+        try { toneGenerator = new ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80); }
+        catch (Exception e) { Log.e(TAG, "ToneGenerator init failed", e); }
 
-        BarcodeScannerOptions options = new BarcodeScannerOptions.Builder()
-                .setBarcodeFormats(Barcode.FORMAT_ALL_FORMATS)
-                .build();
-        barcodeScanner = BarcodeScanning.getClient(options);
+        barcodeScanner = BarcodeScanning.getClient(
+                new BarcodeScannerOptions.Builder()
+                        .setBarcodeFormats(Barcode.FORMAT_ALL_FORMATS)
+                        .build());
 
         loadHistory();
 
         btnCopy.setOnClickListener(v -> copyToClipboard());
         btnRescan.setOnClickListener(v -> resumeScanning());
-        btnHistory.setOnClickListener(v -> showHistory());
+        btnHistory.setOnClickListener(v -> startActivity(new android.content.Intent(this, HistoryActivity.class)));
 
         startScanLineAnimation();
 
@@ -141,9 +136,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void startCamera() {
-        ListenableFuture<ProcessCameraProvider> future =
-                ProcessCameraProvider.getInstance(this);
-
+        ListenableFuture<ProcessCameraProvider> future = ProcessCameraProvider.getInstance(this);
         future.addListener(() -> {
             try {
                 ProcessCameraProvider provider = future.get();
@@ -157,37 +150,23 @@ public class MainActivity extends AppCompatActivity {
                         .build();
                 analysis.setAnalyzer(cameraExecutor, this::analyzeImage);
 
-                provider.bindToLifecycle(
-                        this,
-                        CameraSelector.DEFAULT_BACK_CAMERA,
-                        preview,
-                        analysis
-                );
+                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis);
             } catch (Exception e) {
                 Log.e(TAG, "startCamera failed", e);
-                runOnUiThread(() ->
-                        Toast.makeText(this, "相机启动失败，请重启应用", Toast.LENGTH_LONG).show());
+                runOnUiThread(() -> Toast.makeText(this, "相机启动失败", Toast.LENGTH_LONG).show());
             }
         }, ContextCompat.getMainExecutor(this));
     }
 
     private void analyzeImage(ImageProxy imageProxy) {
-        if (!isScanning) {
-            imageProxy.close();
-            return;
-        }
+        if (!isScanning) { imageProxy.close(); return; }
         try {
             @SuppressWarnings("UnsafeOptInUsageError")
             android.media.Image mediaImage = imageProxy.getImage();
-            if (mediaImage == null) {
-                imageProxy.close();
-                return;
-            }
+            if (mediaImage == null) { imageProxy.close(); return; }
 
             InputImage image = InputImage.fromMediaImage(
-                    mediaImage,
-                    imageProxy.getImageInfo().getRotationDegrees()
-            );
+                    mediaImage, imageProxy.getImageInfo().getRotationDegrees());
 
             barcodeScanner.process(image)
                     .addOnSuccessListener(barcodes -> {
@@ -200,7 +179,7 @@ public class MainActivity extends AppCompatActivity {
                         }
                     })
                     .addOnFailureListener(e -> Log.w(TAG, "Scan failed", e))
-                    .addOnCompleteListener(task -> imageProxy.close());
+                    .addOnCompleteListener(t -> imageProxy.close());
         } catch (Exception e) {
             Log.e(TAG, "analyzeImage error", e);
             imageProxy.close();
@@ -223,35 +202,24 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void beep() {
-        try {
-            if (toneGenerator != null) {
-                toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP, 150);
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "beep error", e);
-        }
+        try { if (toneGenerator != null) toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP, 150); }
+        catch (Exception e) { Log.e(TAG, "beep error", e); }
     }
 
     private void vibrate() {
         try {
             Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
-            if (v != null && v.hasVibrator()) {
+            if (v != null && v.hasVibrator())
                 v.vibrate(VibrationEffect.createOneShot(120, VibrationEffect.DEFAULT_AMPLITUDE));
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "vibrate error", e);
-        }
+        } catch (Exception e) { Log.e(TAG, "vibrate error", e); }
     }
 
     // ── 历史记录 ──────────────────────────────────────────
 
     private void saveToHistory(String value) {
-        String time = new SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
-                .format(new Date());
+        String time = new SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(new Date());
         historyList.add(0, new String[]{value, time});
-        if (historyList.size() > MAX_HISTORY) {
-            historyList.remove(historyList.size() - 1);
-        }
+        if (historyList.size() > MAX_HISTORY) historyList.remove(historyList.size() - 1);
         persistHistory();
     }
 
@@ -259,79 +227,45 @@ public class MainActivity extends AppCompatActivity {
         try {
             JSONArray arr = new JSONArray();
             for (String[] item : historyList) {
-                JSONArray entry = new JSONArray();
-                entry.put(item[0]);
-                entry.put(item[1]);
-                arr.put(entry);
+                JSONArray e = new JSONArray();
+                e.put(item[0]); e.put(item[1]);
+                arr.put(e);
             }
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                    .edit()
-                    .putString(KEY_HISTORY, arr.toString())
-                    .apply();
-        } catch (Exception e) {
-            Log.e(TAG, "persistHistory error", e);
-        }
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                    .putString(KEY_HISTORY, arr.toString()).apply();
+        } catch (Exception e) { Log.e(TAG, "persistHistory error", e); }
     }
 
     private void loadHistory() {
         try {
-            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-            String json = prefs.getString(KEY_HISTORY, "[]");
+            String json = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .getString(KEY_HISTORY, "[]");
             JSONArray arr = new JSONArray(json);
             historyList.clear();
             for (int i = 0; i < arr.length(); i++) {
                 JSONArray entry = arr.getJSONArray(i);
                 historyList.add(new String[]{entry.getString(0), entry.getString(1)});
             }
-        } catch (JSONException e) {
-            Log.e(TAG, "loadHistory error", e);
-        }
+        } catch (JSONException e) { Log.e(TAG, "loadHistory error", e); }
     }
 
-    private void showHistory() {
-        if (historyList.isEmpty()) {
-            Toast.makeText(this, "暂无历史记录", Toast.LENGTH_SHORT).show();
-            return;
-        }
 
-        // 构建列表适配器
-        ArrayAdapter<String[]> adapter = new ArrayAdapter<String[]>(
-                this, android.R.layout.simple_list_item_2, android.R.id.text1, historyList) {
-            @Override
-            public View getView(int position, View convertView, ViewGroup parent) {
-                View v = super.getView(position, convertView, parent);
-                String[] item = historyList.get(position);
-                ((TextView) v.findViewById(android.R.id.text1)).setText(item[0]);
-                ((TextView) v.findViewById(android.R.id.text2)).setText(item[1]);
-                return v;
+    private class HistoryAdapter extends BaseAdapter {
+        @Override public int getCount() { return historyList.size(); }
+        @Override public Object getItem(int i) { return historyList.get(i); }
+        @Override public long getItemId(int i) { return i; }
+
+        @Override
+        public View getView(int position, View convertView, ViewGroup parent) {
+            if (convertView == null) {
+                convertView = LayoutInflater.from(MainActivity.this)
+                        .inflate(R.layout.item_history, parent, false);
             }
-        };
-
-        ListView listView = new ListView(this);
-        listView.setAdapter(adapter);
-        listView.setPadding(0, 8, 0, 8);
-
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("历史记录")
-                .setView(listView)
-                .setNegativeButton("清空", (d, w) -> {
-                    historyList.clear();
-                    persistHistory();
-                    Toast.makeText(this, "已清空", Toast.LENGTH_SHORT).show();
-                })
-                .setPositiveButton("关闭", null)
-                .create();
-
-        // 点击列表项直接复制
-        listView.setOnItemClickListener((parent, view, position, id) -> {
-            String value = historyList.get(position)[0];
-            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-            cm.setPrimaryClip(ClipData.newPlainText("barcode", value));
-            Toast.makeText(this, "已复制：" + value, Toast.LENGTH_SHORT).show();
-            dialog.dismiss();
-        });
-
-        dialog.show();
+            String[] item = historyList.get(position);
+            ((TextView) convertView.findViewById(R.id.tvValue)).setText(item[0]);
+            ((TextView) convertView.findViewById(R.id.tvTime)).setText(item[1]);
+            return convertView;
+        }
     }
 
     // ──────────────────────────────────────────────────────
@@ -340,14 +274,11 @@ public class MainActivity extends AppCompatActivity {
         if (lastScannedResult.isEmpty()) return;
         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         cm.setPrimaryClip(ClipData.newPlainText("barcode", lastScannedResult));
-
         btnCopy.setText("✓ 已复制");
-        btnCopy.setBackgroundTintList(
-                ContextCompat.getColorStateList(this, R.color.success_green));
+        btnCopy.setBackgroundTintList(ContextCompat.getColorStateList(this, R.color.success_green));
         btnCopy.postDelayed(() -> {
             btnCopy.setText("复制");
-            btnCopy.setBackgroundTintList(
-                    ContextCompat.getColorStateList(this, R.color.accent_blue));
+            btnCopy.setBackgroundTintList(ContextCompat.getColorStateList(this, R.color.accent_blue));
         }, 2000);
         Toast.makeText(this, "已复制到剪贴板", Toast.LENGTH_SHORT).show();
     }
