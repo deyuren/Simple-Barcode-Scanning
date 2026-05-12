@@ -5,21 +5,16 @@ import android.animation.ObjectAnimator;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.graphics.Color;
-import android.graphics.drawable.ColorDrawable;
 import android.media.AudioManager;
 import android.media.ToneGenerator;
 import android.os.Bundle;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.util.Log;
-import android.view.Gravity;
 import android.view.View;
-import android.view.ViewGroup;
-import android.view.Window;
-import android.widget.BaseAdapter;
 import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -30,7 +25,6 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageAnalysis;
-import androidx.camera.core.ImageProxy;
 import androidx.camera.core.Preview;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
@@ -62,14 +56,9 @@ public class MainActivity extends AppCompatActivity {
     private static final int MAX_HISTORY = 50;
 
     private PreviewView previewView;
-    private TextView tvResult;
-    private TextView tvHint;
-    private Button btnCopy;
-    private Button btnRescan;
-    private Button btnHistory;
-    private View resultCard;
-    private View scannerOverlay;
-    private View scanLine;
+    private TextView tvResult, tvHint;
+    private Button btnCopy, btnRescan, btnHistory;
+    private View resultCard, scannerOverlay, scanLine;
     private ImageView ivSuccess;
 
     private ExecutorService cameraExecutor;
@@ -77,12 +66,15 @@ public class MainActivity extends AppCompatActivity {
     private String lastScannedResult = "";
     private BarcodeScanner barcodeScanner;
     private ToneGenerator toneGenerator;
-    private final List<String[]> historyList = new ArrayList<>();
+    private List<String[]> historyList = new ArrayList<>();
 
     private final ActivityResultLauncher<String> permissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
-                if (granted) startCamera();
-                else Toast.makeText(this, "需要相机权限", Toast.LENGTH_LONG).show();
+                if (granted) {
+                    startCamera();
+                } else {
+                    Toast.makeText(this, "需要相机权限", Toast.LENGTH_LONG).show();
+                }
             });
 
     @Override
@@ -103,8 +95,11 @@ public class MainActivity extends AppCompatActivity {
 
         cameraExecutor = Executors.newSingleThreadExecutor();
 
-        try { toneGenerator = new ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80); }
-        catch (Exception e) { Log.e(TAG, "ToneGenerator init failed", e); }
+        try {
+            toneGenerator = new ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80);
+        } catch (Exception e) {
+            Log.e(TAG, "ToneGenerator init failed", e);
+        }
 
         barcodeScanner = BarcodeScanning.getClient(
                 new BarcodeScannerOptions.Builder()
@@ -115,7 +110,8 @@ public class MainActivity extends AppCompatActivity {
 
         btnCopy.setOnClickListener(v -> copyToClipboard());
         btnRescan.setOnClickListener(v -> resumeScanning());
-        btnHistory.setOnClickListener(v -> startActivity(new android.content.Intent(this, HistoryActivity.class)));
+        btnHistory.setOnClickListener(v ->
+                startActivity(new Intent(this, HistoryActivity.class)));
 
         startScanLineAnimation();
 
@@ -136,7 +132,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void startCamera() {
-        ListenableFuture<ProcessCameraProvider> future = ProcessCameraProvider.getInstance(this);
+        ListenableFuture<ProcessCameraProvider> future =
+                ProcessCameraProvider.getInstance(this);
+
         future.addListener(() -> {
             try {
                 ProcessCameraProvider provider = future.get();
@@ -150,21 +148,29 @@ public class MainActivity extends AppCompatActivity {
                         .build();
                 analysis.setAnalyzer(cameraExecutor, this::analyzeImage);
 
-                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis);
+                provider.bindToLifecycle(this,
+                        CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis);
+
             } catch (Exception e) {
                 Log.e(TAG, "startCamera failed", e);
-                runOnUiThread(() -> Toast.makeText(this, "相机启动失败", Toast.LENGTH_LONG).show());
+                runOnUiThread(() ->
+                        Toast.makeText(this, "相机启动失败，请重启应用", Toast.LENGTH_LONG).show());
             }
         }, ContextCompat.getMainExecutor(this));
     }
 
-    private void analyzeImage(ImageProxy imageProxy) {
-        if (!isScanning) { imageProxy.close(); return; }
+    private void analyzeImage(androidx.camera.core.ImageProxy imageProxy) {
+        if (!isScanning) {
+            imageProxy.close();
+            return;
+        }
         try {
             @SuppressWarnings("UnsafeOptInUsageError")
             android.media.Image mediaImage = imageProxy.getImage();
-            if (mediaImage == null) { imageProxy.close(); return; }
-
+            if (mediaImage == null) {
+                imageProxy.close();
+                return;
+            }
             InputImage image = InputImage.fromMediaImage(
                     mediaImage, imageProxy.getImageInfo().getRotationDegrees());
 
@@ -178,7 +184,7 @@ public class MainActivity extends AppCompatActivity {
                             }
                         }
                     })
-                    .addOnFailureListener(e -> Log.w(TAG, "Scan failed", e))
+                    .addOnFailureListener(e -> Log.w(TAG, "scan failed", e))
                     .addOnCompleteListener(t -> imageProxy.close());
         } catch (Exception e) {
             Log.e(TAG, "analyzeImage error", e);
@@ -202,8 +208,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void beep() {
-        try { if (toneGenerator != null) toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP, 150); }
-        catch (Exception e) { Log.e(TAG, "beep error", e); }
+        try {
+            if (toneGenerator != null)
+                toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP, 150);
+        } catch (Exception e) {
+            Log.e(TAG, "beep error", e);
+        }
     }
 
     private void vibrate() {
@@ -211,6 +221,80 @@ public class MainActivity extends AppCompatActivity {
             Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
             if (v != null && v.hasVibrator())
                 v.vibrate(VibrationEffect.createOneShot(120, VibrationEffect.DEFAULT_AMPLITUDE));
-        } catch (Exception e) { Log.e(TAG, "vibrate error", e); }
+        } catch (Exception e) {
+            Log.e(TAG, "vibrate error", e);
+        }
+    }
+
+    private void saveToHistory(String value) {
+        String time = new SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(new Date());
+        historyList.add(0, new String[]{value, time});
+        if (historyList.size() > MAX_HISTORY)
+            historyList.remove(historyList.size() - 1);
+        persistHistory();
+    }
+
+    private void persistHistory() {
+        try {
+            JSONArray arr = new JSONArray();
+            for (String[] item : historyList) {
+                JSONArray entry = new JSONArray();
+                entry.put(item[0]);
+                entry.put(item[1]);
+                arr.put(entry);
+            }
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .edit().putString(KEY_HISTORY, arr.toString()).apply();
+        } catch (JSONException e) {
+            Log.e(TAG, "persistHistory error", e);
+        }
+    }
+
+    private void loadHistory() {
+        try {
+            String json = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .getString(KEY_HISTORY, "[]");
+            JSONArray arr = new JSONArray(json);
+            historyList.clear();
+            for (int i = 0; i < arr.length(); i++) {
+                JSONArray entry = arr.getJSONArray(i);
+                historyList.add(new String[]{entry.getString(0), entry.getString(1)});
+            }
+        } catch (JSONException e) {
+            Log.e(TAG, "loadHistory error", e);
+        }
+    }
+
+    private void copyToClipboard() {
+        if (lastScannedResult.isEmpty()) return;
+        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        cm.setPrimaryClip(ClipData.newPlainText("barcode", lastScannedResult));
+
+        btnCopy.setText("✓ 已复制");
+        btnCopy.setBackgroundTintList(
+                ContextCompat.getColorStateList(this, R.color.success_green));
+        btnCopy.postDelayed(() -> {
+            btnCopy.setText("复制");
+            btnCopy.setBackgroundTintList(
+                    ContextCompat.getColorStateList(this, R.color.accent_blue));
+        }, 2000);
+        Toast.makeText(this, "已复制到剪贴板", Toast.LENGTH_SHORT).show();
+    }
+
+    private void resumeScanning() {
+        lastScannedResult = "";
+        isScanning = true;
+        resultCard.setVisibility(View.GONE);
+        scannerOverlay.setVisibility(View.VISIBLE);
+        tvHint.setText("将条形码对准扫描框");
+        ivSuccess.setVisibility(View.GONE);
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        cameraExecutor.shutdown();
+        barcodeScanner.close();
+        if (toneGenerator != null) toneGenerator.release();
     }
 }
